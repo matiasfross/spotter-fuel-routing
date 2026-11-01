@@ -47,4 +47,8 @@ htmlcov/
 *.mp3
 video_temp/
 audio_tracks/
+auto_loom_exec.py
+generate_audio.py
+record_screen_actions.py
+
 
