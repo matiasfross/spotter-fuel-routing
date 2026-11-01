@@ -53,6 +53,7 @@ record_screen_actions.py
 merge_video.py
 concat_audio.py
 test_showcase_render.py
+test_direct_map.py
 loom_link.txt
 .agents/
 emailText.txt
