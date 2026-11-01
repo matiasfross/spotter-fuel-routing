@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optimal Fuel Route Navigator | Spotter</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        #map { height: calc(100vh - 72px); }
+        .custom-popup .leaflet-popup-content-wrapper {
+            background: #1e293b;
+            color: #f8fafc;
+            border-radius: 0.75rem;
+            padding: 4px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+        }
+        .custom-popup .leaflet-popup-tip {
+            background: #1e293b;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans antialiased overflow-hidden">
+
+    <!-- Top Navbar -->
+    <header class="h-[72px] bg-slate-800/90 backdrop-blur border-b border-slate-700/80 px-6 flex items-center justify-between z-30 relative shadow-md">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 text-xl font-bold">
+                <i class="fa-solid fa-gas-pump"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                    Spotter Fuel Route Optimizer
+                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">API Active</span>
+                </h1>
+                <p class="text-xs text-slate-400">Max Range: 500 mi &bull; Efficiency: 10 MPG &bull; Cost-Optimized Fueling</p>
+            </div>
+        </div>
+
+        <!-- Quick Route Form -->
+        <form method="GET" action="/api/route/map/" class="flex items-center gap-2">
+            <div class="relative">
+                <i class="fa-solid fa-location-dot absolute left-3 top-2.5 text-xs text-emerald-400"></i>
+                <input type="text" name="start" value="{{ start_query|default:'New York, NY' }}" placeholder="Start (e.g. New York, NY)" class="bg-slate-950/80 border border-slate-700 text-xs rounded-lg pl-8 pr-3 py-2 text-slate-200 focus:outline-none focus:border-blue-500 w-44">
+            </div>
+            <span class="text-slate-500 text-xs"><i class="fa-solid fa-arrow-right"></i></span>
+            <div class="relative">
+                <i class="fa-solid fa-flag-checkered absolute left-3 top-2.5 text-xs text-rose-400"></i>
+                <input type="text" name="finish" value="{{ finish_query|default:'Los Angeles, CA' }}" placeholder="Finish (e.g. Los Angeles, CA)" class="bg-slate-950/80 border border-slate-700 text-xs rounded-lg pl-8 pr-3 py-2 text-slate-200 focus:outline-none focus:border-blue-500 w-44">
+            </div>
+            <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium px-4 py-2 rounded-lg transition shadow-md flex items-center gap-1.5">
+                <i class="fa-solid fa-route"></i> Calculate Route
+            </button>
+        </form>
+    </header>
+
+    <!-- Main Content: Sidebar + Map -->
+    <div class="flex h-[calc(100vh-72px)] relative">
+        
+        <!-- Sidebar -->
+        <aside class="w-96 bg-slate-900 border-r border-slate-800 flex flex-col z-20 shadow-xl overflow-hidden">
+            
+            {% if error %}
+            <div class="p-6 m-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-sm">
+                <div class="font-bold flex items-center gap-2 mb-1">
+                    <i class="fa-solid fa-triangle-exclamation"></i> Error Calculating Route
+                </div>
+                <p>{{ error }}</p>
+            </div>
+            {% else %}
+
+            <!-- Summary KPI Cards -->
+            <div class="p-5 border-b border-slate-800 space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-slate-800/60 p-3 rounded-xl border border-slate-700/50">
+                        <span class="text-[11px] font-medium text-slate-400 uppercase tracking-wider block">Total Distance</span>
+                        <span class="text-xl font-bold text-white">{{ summary.total_distance_miles|floatformat:1 }}</span>
+                        <span class="text-xs text-slate-400 ml-0.5">mi</span>
+                    </div>
+                    <div class="bg-emerald-950/30 p-3 rounded-xl border border-emerald-500/30">
+                        <span class="text-[11px] font-medium text-emerald-400 uppercase tracking-wider block">Total Fuel Cost</span>
+                        <span class="text-xl font-bold text-emerald-400">${{ summary.total_fuel_cost_dollars|floatformat:2 }}</span>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div class="bg-slate-800/40 p-2 rounded-lg border border-slate-800">
+                        <span class="text-slate-400 block text-[10px]">Fuel Consumed</span>
+                        <span class="font-semibold text-slate-200">{{ summary.total_fuel_consumed_gallons|floatformat:1 }} gal</span>
+                    </div>
+                    <div class="bg-slate-800/40 p-2 rounded-lg border border-slate-800">
+                        <span class="text-slate-400 block text-[10px]">Avg Price</span>
+                        <span class="font-semibold text-amber-400">${{ summary.average_fuel_price_dollars|floatformat:3 }}/gal</span>
+                    </div>
+                    <div class="bg-slate-800/40 p-2 rounded-lg border border-slate-800">
+                        <span class="text-slate-400 block text-[10px]">Fuel Stops</span>
+                        <span class="font-semibold text-blue-400">{{ summary.number_of_fuel_stops }}</span>
+                    </div>
+                </div>
+
+                <!-- Locations badge -->
+                <div class="text-xs bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80 space-y-1">
+                    <div class="flex items-center gap-2 text-slate-300">
+                        <i class="fa-solid fa-circle text-[8px] text-emerald-400"></i>
+                        <span class="font-semibold text-slate-400">From:</span>
+                        <span class="truncate">{{ origin.name }}</span>
+                    </div>
+                    <div class="flex items-center gap-2 text-slate-300">
+                        <i class="fa-solid fa-circle text-[8px] text-rose-400"></i>
+                        <span class="font-semibold text-slate-400">To:</span>
+                        <span class="truncate">{{ destination.name }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stops Header -->
+            <div class="px-5 py-2.5 bg-slate-800/40 border-b border-slate-800 flex justify-between items-center text-xs">
+                <span class="font-semibold uppercase tracking-wider text-slate-400">Optimal Fuel Stops Plan</span>
+                <span class="text-[11px] text-slate-500">Sorted by Mile Marker</span>
+            </div>
+
+            <!-- Stops List -->
+            <div class="flex-1 overflow-y-auto divide-y divide-slate-800/60 p-2 space-y-1" id="stops-list">
+                {% if fuel_stops %}
+                    {% for stop in fuel_stops %}
+                    <div class="p-3 rounded-lg hover:bg-slate-800/70 transition cursor-pointer border border-transparent hover:border-slate-700/60 stop-item" 
+                         onclick="focusStop({{ stop.latitude }}, {{ stop.longitude }}, {{ stop.stop_number }})">
+                        <div class="flex items-start justify-between">
+                            <div class="flex items-start gap-2.5">
+                                <span class="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
+                                    {{ stop.stop_number }}
+                                </span>
+                                <div>
+                                    <h4 class="text-xs font-bold text-white line-clamp-1">{{ stop.name }}</h4>
+                                    <p class="text-[11px] text-slate-400">{{ stop.city }}, {{ stop.state }}</p>
+                                    <p class="text-[10px] text-slate-500 mt-0.5">Leg dist: +{{ stop.distance_from_last_stop }} mi &bull; Marker: mi {{ stop.mile_marker }}</p>
+                                </div>
+                            </div>
+                            <div class="text-right shrink-0">
+                                <span class="text-xs font-extrabold text-amber-400 block">${{ stop.retail_price }}/gal</span>
+                                <span class="text-[10px] text-emerald-400 font-medium block">${{ stop.cost_at_stop }}</span>
+                                <span class="text-[10px] text-slate-500">{{ stop.gallons_purchased }} gal</span>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="p-6 text-center text-slate-400 text-xs">
+                        <i class="fa-solid fa-circle-check text-emerald-400 text-2xl mb-2 block"></i>
+                        No intermediate fuel stops required.<br>Trip distance is within vehicle range.
+                    </div>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <!-- Footer -->
+            <div class="p-3 bg-slate-950 border-t border-slate-800/80 text-[11px] text-slate-500 flex justify-between items-center">
+                <span>Spotter Django Assessment</span>
+                <a href="/api/route/?start={{ start_query|urlencode }}&finish={{ finish_query|urlencode }}" target="_blank" class="text-blue-400 hover:text-blue-300 flex items-center gap-1">
+                    Raw JSON <i class="fa-solid fa-external-link text-[9px]"></i>
+                </a>
+            </div>
+        </aside>
+
+        <!-- Map Container -->
+        <main class="flex-1 relative">
+            <div id="map"></div>
+        </main>
+    </div>
+
+    <!-- Map Script -->
+    <script>
+        const routeData = {{ data_json|safe|default:'null' }};
+        let map;
+        let markers = {};
+
+        if (routeData && routeData.map_geojson) {
+            // Initialize Leaflet map
+            map = L.map('map', {
+                zoomControl: false
+            }).setView([39.8283, -98.5795], 4);
+
+            L.control.zoom({ position: 'topright' }).addTo(map);
+
+            // OpenStreetMap tile layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; OpenStreetMap contributors | Spotter Assessment'
+            }).addTo(map);
+
+            // GeoJSON layer styling
+            const geojsonLayer = L.geoJSON(routeData.map_geojson, {
+                style: function (feature) {
+                    if (feature.geometry.type === 'LineString') {
+                        return {
+                            color: '#2563eb',
+                            weight: 5,
+                            opacity: 0.85,
+                            lineJoin: 'round'
+                        };
+                    }
+                },
+                pointToLayer: function (feature, latlng) {
+                    const props = feature.properties;
+                    let markerHtml = '';
+
+                    if (props.type === 'origin') {
+                        markerHtml = `
+                            <div class="w-8 h-8 rounded-full bg-emerald-600 text-white border-2 border-white flex items-center justify-center font-bold text-xs shadow-lg">
+                                <i class="fa-solid fa-play text-[10px]"></i>
+                            </div>`;
+                    } else if (props.type === 'destination') {
+                        markerHtml = `
+                            <div class="w-8 h-8 rounded-full bg-rose-600 text-white border-2 border-white flex items-center justify-center font-bold text-xs shadow-lg">
+                                <i class="fa-solid fa-flag-checkered text-[10px]"></i>
+                            </div>`;
+                    } else if (props.type === 'fuel_stop') {
+                        markerHtml = `
+                            <div class="w-7 h-7 rounded-full bg-amber-500 text-slate-900 border-2 border-white flex items-center justify-center font-black text-xs shadow-lg">
+                                ${props.stop_number}
+                            </div>`;
+                    }
+
+                    const customIcon = L.divIcon({
+                        className: 'custom-pin',
+                        html: markerHtml,
+                        iconSize: [28, 28],
+                        iconAnchor: [14, 14],
+                        popupAnchor: [0, -14]
+                    });
+
+                    const marker = L.marker(latlng, { icon: customIcon });
+
+                    if (props.type === 'fuel_stop') {
+                        markers[props.stop_number] = marker;
+                    }
+
+                    return marker;
+                },
+                onEachFeature: function (feature, layer) {
+                    const props = feature.properties;
+                    if (props.type === 'fuel_stop') {
+                        const popupContent = `
+                            <div class="text-slate-100 text-xs space-y-1.5 p-1">
+                                <div class="flex items-center justify-between gap-2 border-b border-slate-700 pb-1">
+                                    <span class="font-bold text-amber-400">Stop #${props.stop_number}</span>
+                                    <span class="font-extrabold text-emerald-400 text-sm">$${props.retail_price}/gal</span>
+                                </div>
+                                <div class="font-bold text-sm text-white">${props.name}</div>
+                                <div class="text-slate-400 text-[11px]">${props.address}, ${props.city}, ${props.state}</div>
+                                <div class="grid grid-cols-2 gap-2 pt-1 text-[11px] bg-slate-800/80 p-2 rounded">
+                                    <div><span class="text-slate-400">Gallons:</span> <span class="font-bold">${props.gallons_purchased} gal</span></div>
+                                    <div><span class="text-slate-400">Leg Cost:</span> <span class="font-bold text-emerald-400">$${props.cost_at_stop}</span></div>
+                                    <div><span class="text-slate-400">Mile Marker:</span> <span class="font-bold">${props.mile_marker} mi</span></div>
+                                    <div><span class="text-slate-400">Leg Distance:</span> <span class="font-bold">+${props.distance_from_last_stop} mi</span></div>
+                                </div>
+                            </div>
+                        `;
+                        layer.bindPopup(popupContent, { className: 'custom-popup', maxWidth: 300 });
+                    } else if (props.type === 'origin' || props.type === 'destination') {
+                        layer.bindPopup(`<div class="p-1 font-bold text-xs text-white">${props.title}</div>`, { className: 'custom-popup' });
+                    }
+                }
+            }).addTo(map);
+
+            // Fit bounds to polyline
+            map.fitBounds(geojsonLayer.getBounds(), { padding: [40, 40] });
+        }
+
+        function focusStop(lat, lon, stopNumber) {
+            if (map && markers[stopNumber]) {
+                map.flyTo([lat, lon], 12, { duration: 1.2 });
+                markers[stopNumber].openPopup();
+            }
+        }
+    </script>
+</body>
+</html>

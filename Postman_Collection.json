@@ -1,0 +1,154 @@
+{
+	"info": {
+		"_postman_id": "7aeaa3ea-428b-49f0-8b29-spotter-fuel-routing",
+		"name": "Spotter - Optimal Fuel Routing API",
+		"description": "Postman collection to test the Fuel Routing & Optimization API developed for Spotter Backend Assessment.\nVehicle specs: 500-mile max range, 10 MPG.\nFree routing engine: OSRM.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://127.0.0.1:8000/api/health/",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "8000",
+					"path": ["api", "health", ""]
+				},
+				"description": "Verifies that the API service is active and the geocoded fuel stops dataset (6,600+ stops) is fully loaded in memory."
+			},
+			"response": []
+		},
+		{
+			"name": "2. Route Optimization (GET) - New York to Los Angeles",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://127.0.0.1:8000/api/route/?start=New York, NY&finish=Los Angeles, CA",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "8000",
+					"path": ["api", "route", ""],
+					"query": [
+						{
+							"key": "start",
+							"value": "New York, NY"
+						},
+						{
+							"key": "finish",
+							"value": "Los Angeles, CA"
+						}
+					]
+				},
+				"description": "Cross-country transcontinental route (~2,790 miles). Demonstrates multiple optimal fuel stops ensuring vehicle never runs out of fuel (<500 mi per leg)."
+			},
+			"response": []
+		},
+		{
+			"name": "3. Route Optimization (POST) - Chicago to Houston",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"start\": \"Chicago, IL\",\n    \"finish\": \"Houston, TX\",\n    \"max_range\": 500.0,\n    \"mpg\": 10.0\n}"
+				},
+				"url": {
+					"raw": "http://127.0.0.1:8000/api/route/",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "8000",
+					"path": ["api", "route", ""]
+				},
+				"description": "POST endpoint with JSON payload for ~1,080-mile route from Chicago to Houston."
+			},
+			"response": []
+		},
+		{
+			"name": "4. Route Optimization (Coordinates) - Miami to Seattle",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"start\": \"25.7617, -80.1918\",\n    \"finish\": \"47.6062, -122.3321\",\n    \"max_range\": 500.0,\n    \"mpg\": 10.0\n}"
+				},
+				"url": {
+					"raw": "http://127.0.0.1:8000/api/route/",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "8000",
+					"path": ["api", "route", ""]
+				},
+				"description": "Diagonal route across the US using direct latitude/longitude coordinate strings."
+			},
+			"response": []
+		},
+		{
+			"name": "5. Short Route (< 500 miles, Zero Stops Required)",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://127.0.0.1:8000/api/route/?start=Philadelphia, PA&finish=New York, NY",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "8000",
+					"path": ["api", "route", ""],
+					"query": [
+						{
+							"key": "start",
+							"value": "Philadelphia, PA"
+						},
+						{
+							"key": "finish",
+							"value": "New York, NY"
+						}
+					]
+				},
+				"description": "Short route under 100 miles. Correctly identifies 0 stops needed under vehicle's 500-mile initial range."
+			},
+			"response": []
+		},
+		{
+			"name": "6. Validation Error - Location Outside USA",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://127.0.0.1:8000/api/route/?start=Toronto, ON&finish=Montreal, QC",
+					"protocol": "http",
+					"host": ["127", "0", "0", "1"],
+					"port": "8000",
+					"path": ["api", "route", ""],
+					"query": [
+						{
+							"key": "start",
+							"value": "Toronto, ON"
+						},
+						{
+							"key": "finish",
+							"value": "Montreal, QC"
+						}
+					]
+				},
+				"description": "Demonstrates boundary enforcement returning 400 Bad Request when coordinates lie outside the USA."
+			},
+			"response": []
+		}
+	]
+}
