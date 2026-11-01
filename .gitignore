@@ -50,6 +50,9 @@ audio_tracks/
 auto_loom_exec.py
 generate_audio.py
 record_screen_actions.py
+merge_video.py
+concat_audio.py
+test_showcase_render.py
 loom_link.txt
 .agents/
 emailText.txt
