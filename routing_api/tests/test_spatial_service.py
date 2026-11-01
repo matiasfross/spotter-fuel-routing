@@ -1,5 +1,5 @@
-import pytest
 from django.test import SimpleTestCase
+
 from routing_api.services.spatial_service import SpatialFuelService
 
 

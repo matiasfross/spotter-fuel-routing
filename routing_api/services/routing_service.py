@@ -1,8 +1,9 @@
 import json
 import logging
-import urllib.request
 import urllib.error
-from typing import Dict, Any, Tuple
+import urllib.request
+from typing import Any
+
 from django.conf import settings
 from rest_framework.exceptions import APIException, ValidationError
 
@@ -19,7 +20,7 @@ class RoutingService:
     """
 
     @classmethod
-    def get_route(cls, start: Tuple[float, float], finish: Tuple[float, float]) -> Dict[str, Any]:
+    def get_route(cls, start: tuple[float, float], finish: tuple[float, float]) -> dict[str, Any]:
         """
         Calculates driving route between start (lat, lon) and finish (lat, lon).
         Returns:
@@ -89,9 +90,11 @@ class RoutingService:
                     err_content = e.read().decode('utf-8')
                     err_json = json.loads(err_content)
                     msg = err_json.get('message', 'Invalid routing request coordinates.')
-                except Exception:
+                except (json.JSONDecodeError, TypeError, ValueError):
                     msg = "Invalid routing request coordinates."
                 raise ValidationError({'route': f"Routing engine rejected coordinates: {msg}"})
+            elif e.code == 429:
+                raise APIException("Routing engine rate limit exceeded. Please retry in a few moments.")
             raise APIException(f"Routing engine returned error status {e.code}: {e.reason}")
         except urllib.error.URLError as e:
             logger.error(f"Network error contacting routing engine: {e}")
@@ -100,6 +103,6 @@ class RoutingService:
             )
         except Exception as e:
             if isinstance(e, (ValidationError, APIException)):
-                raise e
+                raise
             logger.error(f"Unexpected error in routing service: {e}")
-            raise APIException(f"Routing failed: {str(e)}")
+            raise APIException(f"Routing failed: {e!s}")

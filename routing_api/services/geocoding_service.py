@@ -1,16 +1,31 @@
+import json
+import logging
 import re
 import urllib.parse
 import urllib.request
-import json
-import logging
-from typing import Dict, Any, Tuple, Optional
+from typing import Any, ClassVar
+
 from django.conf import settings
 from rest_framework.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 
+US_STATE_ABBREVIATIONS: dict[str, str] = {
+    'alabama': 'al', 'alaska': 'ak', 'arizona': 'az', 'arkansas': 'ar', 'california': 'ca',
+    'colorado': 'co', 'connecticut': 'ct', 'delaware': 'de', 'florida': 'fl', 'georgia': 'ga',
+    'hawaii': 'hi', 'idaho': 'id', 'illinois': 'il', 'indiana': 'in', 'iowa': 'ia',
+    'kansas': 'ks', 'kentucky': 'ky', 'louisiana': 'la', 'maine': 'me', 'maryland': 'md',
+    'massachusetts': 'ma', 'michigan': 'mi', 'minnesota': 'mn', 'mississippi': 'ms',
+    'missouri': 'mo', 'montana': 'mt', 'nebraska': 'ne', 'nevada': 'nv', 'new hampshire': 'nh',
+    'new jersey': 'nj', 'new mexico': 'nm', 'new york': 'ny', 'north carolina': 'nc',
+    'north dakota': 'nd', 'ohio': 'oh', 'oklahoma': 'ok', 'oregon': 'or', 'pennsylvania': 'pa',
+    'rhode island': 'ri', 'south carolina': 'sc', 'south dakota': 'sd', 'tennessee': 'tn',
+    'texas': 'tx', 'utah': 'ut', 'vermont': 'vt', 'virginia': 'va', 'washington': 'wa',
+    'west virginia': 'wv', 'wisconsin': 'wi', 'wyoming': 'wy', 'district of columbia': 'dc',
+}
+
 # Pre-cached coordinates for top 120 US cities and transport hubs for instant offline resolution
-OFFLINE_US_CITIES: Dict[str, Tuple[float, float, str]] = {
+OFFLINE_US_CITIES: dict[str, tuple[float, float, str]] = {
     # format: 'normalized_name': (latitude, longitude, formatted_name)
     'new york ny': (40.712776, -74.005974, 'New York, NY'),
     'new york city ny': (40.712776, -74.005974, 'New York, NY'),
@@ -136,10 +151,10 @@ class GeocodingService:
     with offline US hub pre-caching, LRU runtime caching, and USA boundary enforcement.
     """
 
-    _runtime_cache: Dict[str, Dict[str, Any]] = {}
+    _runtime_cache: ClassVar[dict[str, dict[str, Any]]] = {}
 
     @classmethod
-    def resolve_location(cls, location_input: Any, field_name: str = 'location') -> Dict[str, Any]:
+    def resolve_location(cls, location_input: Any, field_name: str = 'location') -> dict[str, Any]:
         """
         Resolves an input into validated US coordinates and a display name.
         Accepts:
@@ -151,6 +166,17 @@ class GeocodingService:
         """
         if not location_input:
             raise ValidationError({field_name: "Location input cannot be empty."})
+
+        # If location_input is a JSON-encoded string (dict or list), attempt to parse it
+        if isinstance(location_input, str):
+            s = location_input.strip()
+            if (s.startswith('{') and s.endswith('}')) or (s.startswith('[') and s.endswith(']')):
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, (dict, list, tuple)):
+                        location_input = parsed
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
 
         # 1. Dict format: {"lat": ..., "lon": ...}
         if isinstance(location_input, dict):
@@ -192,30 +218,38 @@ class GeocodingService:
             raise ValidationError({field_name: f"Invalid format for {field_name}."})
 
         str_input = location_input.strip()
+        cleaned_coord = str_input.strip('[]() ')
 
-        # Check coordinate regex "lat, lon"
-        coord_match = re.match(r'^[-+]?([0-9]+(\.[0-9]+)?)\s*,\s*[-+]?([0-9]+(\.[0-9]+)?)$', str_input)
+        # Check coordinate regex "lat, lon" or "lat lon"
+        coord_match = re.match(r'^[-+]?([0-9]+(\.[0-9]+)?)\s*[\s,]\s*[-+]?([0-9]+(\.[0-9]+)?)$', cleaned_coord)
         if coord_match:
             try:
-                parts = [float(p.strip()) for p in str_input.split(',')]
-                v1, v2 = parts[0], parts[1]
-                # Detect if given as [lon, lat] or [lat, lon]
-                if -180.0 <= v1 <= -60.0 and 20.0 <= v2 <= 75.0:
-                    f_lon, f_lat = v1, v2
-                else:
-                    f_lat, f_lon = v1, v2
-                cls.validate_usa_bounds(f_lat, f_lon, field_name)
-                return {
-                    'name': f"{f_lat:.4f}, {f_lon:.4f}",
-                    'latitude': f_lat,
-                    'longitude': f_lon
-                }
+                parts = [float(p) for p in re.split(r'[,\s]+', cleaned_coord) if p]
+                if len(parts) == 2:
+                    v1, v2 = parts[0], parts[1]
+                    # Detect if given as [lon, lat] or [lat, lon]
+                    if -180.0 <= v1 <= -60.0 and 20.0 <= v2 <= 75.0:
+                        f_lon, f_lat = v1, v2
+                    else:
+                        f_lat, f_lon = v1, v2
+                    cls.validate_usa_bounds(f_lat, f_lon, field_name)
+                    return {
+                        'name': f"{f_lat:.4f}, {f_lon:.4f}",
+                        'latitude': f_lat,
+                        'longitude': f_lon
+                    }
             except ValueError:
                 pass
 
         # Check runtime cache first
-        norm_key = re.sub(r'[^a-z0-9 ]', '', str_input.lower()).strip()
+        norm_key = re.sub(r'[^a-z0-9 ]', ' ', str_input.lower()).strip()
         norm_key = re.sub(r'\s+', ' ', norm_key)
+
+        # Normalize trailing full state name to 2-letter abbreviation
+        for state_name, state_abbr in US_STATE_ABBREVIATIONS.items():
+            if norm_key.endswith(' ' + state_name):
+                norm_key = norm_key[:-len(state_name)] + state_abbr
+                break
 
         if norm_key in cls._runtime_cache:
             return cls._runtime_cache[norm_key]
@@ -231,7 +265,7 @@ class GeocodingService:
         return cls._geocode_with_nominatim(str_input, norm_key, field_name)
 
     @classmethod
-    def _geocode_with_nominatim(cls, query: str, norm_key: str, field_name: str) -> Dict[str, Any]:
+    def _geocode_with_nominatim(cls, query: str, norm_key: str, field_name: str) -> dict[str, Any]:
         """
         Geocodes query using OpenStreetMap Nominatim restricted to USA country code.
         """
@@ -278,7 +312,7 @@ class GeocodingService:
             logger.error(f"Geocoding error for query '{query}': {e}")
             raise ValidationError({
                 field_name: f"Unable to geocode location '{query}'. Please verify spelling or provide coordinates."
-            })
+            }) from e
 
     @classmethod
     def validate_usa_bounds(cls, lat: float, lon: float, field_name: str = 'location') -> None:

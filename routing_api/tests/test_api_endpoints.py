@@ -1,9 +1,9 @@
 import json
 from unittest.mock import patch
-import pytest
+
 from django.urls import reverse
-from rest_framework.test import APITestCase
 from rest_framework import status
+from rest_framework.test import APITestCase
 
 
 class TestRouteApiEndpoints(APITestCase):
@@ -219,4 +219,55 @@ class TestRouteApiEndpoints(APITestCase):
         assert sum_cost == summary['total_fuel_cost_dollars']
         assert sum_gal == summary['total_fuel_consumed_gallons']
         assert sum_gal == summary['total_fuel_purchased_gallons']
+
+    def test_route_blank_or_whitespace_start_finish_rejected(self):
+        url = reverse('route_optimization')
+        # Empty string
+        res1 = self.client.get(url, {'start': '', 'finish': 'Chicago, IL'})
+        assert res1.status_code == status.HTTP_400_BAD_REQUEST
+
+        # Whitespace only
+        res2 = self.client.get(url, {'start': 'New York, NY', 'finish': '   '})
+        assert res2.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_route_map_view_error_formatting(self):
+        url = reverse('route_map')
+        response = self.client.get(url, {'start': '48.8566, 2.3522', 'finish': 'Los Angeles, CA'})
+        assert response.status_code == status.HTTP_200_OK
+        content = response.content.decode('utf-8')
+        assert "Error Calculating Route" in content
+        # Ensure raw ErrorDetail repr is NOT displayed to the user
+        assert "ErrorDetail(" not in content
+        assert "outside the USA" in content
+
+    @patch('routing_api.services.routing_service.RoutingService.get_route')
+    def test_route_map_url_encoding(self, mock_get_route):
+        mock_get_route.return_value = {
+            'distance_miles': 200.0,
+            'duration_hours': 3.0,
+            'coordinates': [[-74.0, 40.7], [-75.0, 40.0]],
+            'bounding_box': [-75.0, 40.0, -74.0, 40.7]
+        }
+
+        url = reverse('route_optimization')
+        response = self.client.get(url, {'start': 'New York, NY', 'finish': 'Los Angeles, CA'})
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert 'map_url' in data
+        # Spaces must be encoded
+        assert ' ' not in data['map_url']
+        assert 'New+York' in data['map_url'] or 'New%20York' in data['map_url']
+
+    def test_route_get_html_view_error_handling(self):
+        url = reverse('route_optimization')
+        response = self.client.get(
+            url,
+            {'start': '48.8566, 2.3522', 'finish': 'Chicago, IL'},
+            HTTP_ACCEPT='text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        content = response.content.decode('utf-8')
+        assert "Error Calculating Route" in content
+        assert "ErrorDetail(" not in content
+        assert "outside the USA" in content
 

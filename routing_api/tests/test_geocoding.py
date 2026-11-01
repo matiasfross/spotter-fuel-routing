@@ -1,6 +1,7 @@
 import pytest
 from django.test import SimpleTestCase
 from rest_framework.exceptions import ValidationError
+
 from routing_api.services.geocoding_service import GeocodingService
 
 
@@ -58,3 +59,39 @@ class TestGeocodingService(SimpleTestCase):
         # Invalidation
         with pytest.raises(ValidationError):
             GeocodingService.validate_usa_bounds(10.0, -75.0)  # Colombia
+
+    def test_resolve_json_string_dict_and_list(self):
+        # JSON-encoded dict string
+        res_dict = GeocodingService.resolve_location('{"lat": 40.7128, "lon": -74.0060}')
+        assert pytest.approx(res_dict['latitude'], 0.001) == 40.7128
+        assert pytest.approx(res_dict['longitude'], 0.001) == -74.0060
+
+        # JSON-encoded list string
+        res_list = GeocodingService.resolve_location('[40.7128, -74.0060]')
+        assert pytest.approx(res_list['latitude'], 0.001) == 40.7128
+        assert pytest.approx(res_list['longitude'], 0.001) == -74.0060
+
+    def test_resolve_bracketed_and_space_separated_coordinates(self):
+        # Bracketed coordinates with spaces
+        res1 = GeocodingService.resolve_location('[ 40.7128, -74.0060 ]')
+        assert pytest.approx(res1['latitude'], 0.001) == 40.7128
+        assert pytest.approx(res1['longitude'], 0.001) == -74.0060
+
+        # Space separated coordinates
+        res2 = GeocodingService.resolve_location('40.7128 -74.0060')
+        assert pytest.approx(res2['latitude'], 0.001) == 40.7128
+        assert pytest.approx(res2['longitude'], 0.001) == -74.0060
+
+    def test_resolve_state_name_normalization(self):
+        # Full state names should normalize to offline cache entries
+        la = GeocodingService.resolve_location("Los Angeles, California")
+        assert "Los Angeles" in la['name']
+        assert pytest.approx(la['latitude'], 0.1) == 34.05
+
+        nyc = GeocodingService.resolve_location("New York, New York")
+        assert "New York" in nyc['name']
+        assert pytest.approx(nyc['latitude'], 0.1) == 40.71
+
+        chi = GeocodingService.resolve_location("Chicago, Illinois")
+        assert "Chicago" in chi['name']
+        assert pytest.approx(chi['latitude'], 0.1) == 41.88

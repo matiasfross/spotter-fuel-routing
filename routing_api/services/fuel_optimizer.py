@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +24,12 @@ class FuelOptimizer:
 
     def optimize(
         self,
-        candidates: List[Dict[str, Any]],
+        candidates: list[dict[str, Any]],
         total_distance_miles: float,
-        start_location: Dict[str, Any],
-        finish_location: Dict[str, Any],
+        start_location: dict[str, Any],
+        finish_location: dict[str, Any],
         start_full_tank: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Computes the optimal sequence of fuel stops minimizing total fuel cost.
         """
@@ -50,12 +50,7 @@ class FuelOptimizer:
         if start_full_tank and total_distance_miles <= self.max_range:
             # Trip can be completed without any refueling stops!
             # We can optionally find the cheapest station along route if the driver wishes to replenish
-            cheapest_station = None
-            if candidates:
-                cheapest_station = min(candidates, key=lambda s: s['retail_price'])
-                refill_cost = round(total_consumed * cheapest_station['retail_price'], 2)
-            else:
-                refill_cost = 0.0
+            cheapest_station = min(candidates, key=lambda s: s['retail_price']) if candidates else None
 
             return {
                 'fuel_stops': [],
@@ -272,11 +267,11 @@ class FuelOptimizer:
 
     def _fallback_greedy_solver(
         self,
-        candidates: List[Dict[str, Any]],
+        candidates: list[dict[str, Any]],
         total_dist: float,
-        start_location: Dict[str, Any],
-        finish_location: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        start_location: dict[str, Any],
+        finish_location: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Fallback greedy strategy if graph has sparse connectivity.
         Selects the cheapest accessible station in each 450-mile horizon.
@@ -290,11 +285,18 @@ class FuelOptimizer:
 
         while curr_dist + self.max_range < total_dist:
             # Candidate window: from curr_dist to curr_dist + max_range
-            # Prefer stations in [curr_dist + 200, curr_dist + max_range - 10]
+            # Prefer stations in [curr_dist + 200, curr_dist + max_range - 10] to avoid clustered stops
             horizon_stops = [
                 s for s in candidates
-                if curr_dist < s['route_dist_miles'] <= curr_dist + self.max_range - 10.0
+                if curr_dist + 200.0 <= s['route_dist_miles'] <= curr_dist + self.max_range - 10.0
             ]
+
+            if not horizon_stops:
+                # Broaden search to entire reachable window [curr_dist, curr_dist + max_range - 10]
+                horizon_stops = [
+                    s for s in candidates
+                    if curr_dist < s['route_dist_miles'] <= curr_dist + self.max_range - 10.0
+                ]
 
             if not horizon_stops:
                 # Broaden search to max range exactly
@@ -340,6 +342,13 @@ class FuelOptimizer:
                 'cost_at_stop': cost,
             })
             curr_dist = best_stop['route_dist_miles']
+
+        # Populate leg_distance_to_next for consistency with DP stops
+        for i, s in enumerate(fuel_stops):
+            if i < len(fuel_stops) - 1:
+                s['leg_distance_to_next'] = round(fuel_stops[i + 1]['mile_marker'] - s['mile_marker'], 1)
+            else:
+                s['leg_distance_to_next'] = round(total_dist - s['mile_marker'], 1)
 
         # Check terminal leg to destination
         rem_dist = total_dist - curr_dist

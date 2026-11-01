@@ -37,6 +37,16 @@ class RouteRequestSerializer(serializers.Serializer):
         help_text="Search radius in miles along the highway corridor to look for truckstops (default: 10 miles)"
     )
 
+    def validate_start(self, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise serializers.ValidationError("Location input cannot be empty.")
+        return value
+
+    def validate_finish(self, value):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise serializers.ValidationError("Location input cannot be empty.")
+        return value
+
 
 class LocationSerializer(serializers.Serializer):
     name = serializers.CharField()

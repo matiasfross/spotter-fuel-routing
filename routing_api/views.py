@@ -1,30 +1,50 @@
 import json
 import logging
-from typing import Dict, Any
+import urllib.parse
+from typing import Any
+
 from django.shortcuts import render
-from django.urls import reverse
-from rest_framework.views import APIView
-from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from .serializers import RouteRequestSerializer, RouteResponseSerializer
+from .serializers import RouteRequestSerializer
 from .services import (
+    FuelOptimizer,
     GeocodingService,
     RoutingService,
     SpatialFuelService,
-    FuelOptimizer,
 )
 
 logger = logging.getLogger(__name__)
 
 
+def format_error_message(e: Exception) -> str:
+    """Extract clean, human-readable error messages from exceptions for UI display."""
+    if hasattr(e, 'detail'):
+        detail = e.detail
+        if isinstance(detail, dict):
+            messages = []
+            for k, v in detail.items():
+                if isinstance(v, (list, tuple)):
+                    msg = ", ".join(str(item) for item in v)
+                else:
+                    msg = str(v)
+                messages.append(msg if k in ('detail', 'error', 'route') else f"{k}: {msg}")
+            return " | ".join(messages)
+        elif isinstance(detail, (list, tuple)):
+            return ", ".join(str(item) for item in detail)
+        return str(detail)
+    return str(e)
+
+
 def build_geojson(
     route_coords: list,
-    start_loc: Dict[str, Any],
-    finish_loc: Dict[str, Any],
+    start_loc: dict[str, Any],
+    finish_loc: dict[str, Any],
     fuel_stops: list
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Constructs a valid GeoJSON FeatureCollection containing the route line,
     start/finish markers, and fuel stop markers with popup metadata.
@@ -114,7 +134,7 @@ def compute_route_data(
     corridor_radius: float = 10.0,
     stop_penalty: float = 0.5,
     request=None
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Core pipeline executing geocoding, routing, spatial candidate search,
     fuel optimization, and GeoJSON generation.
@@ -156,7 +176,9 @@ def compute_route_data(
     # Construct map URL
     start_str = start_loc['name']
     finish_str = finish_loc['name']
-    map_rel_url = f"/api/route/map/?start={start_str}&finish={finish_str}"
+    start_param = urllib.parse.quote_plus(start_str)
+    finish_param = urllib.parse.quote_plus(finish_str)
+    map_rel_url = f"/api/route/map/?start={start_param}&finish={finish_param}"
     map_url = request.build_absolute_uri(map_rel_url) if request else map_rel_url
 
     response_data = {
@@ -211,22 +233,31 @@ class RouteOptimizationView(APIView):
         accept_header = request.headers.get('Accept', '')
         is_html_requested = (
             format_param == 'html' or
-            ('text/html' in accept_header and format_param != 'json')
+            ('text/html' in accept_header and format_param not in ('json', 'api'))
         )
 
         if is_html_requested:
-            data = compute_route_data(
-                start, finish, max_range, mpg, corridor, stop_penalty=0.5, request=request
-            )
-            return render(request, 'routing_api/map.html', {
-                'data_json': json.dumps(data),
-                'summary': data['summary'],
-                'origin': data['origin'],
-                'destination': data['destination'],
-                'fuel_stops': data['fuel_stops'],
-                'start_query': start if isinstance(start, str) else str(start),
-                'finish_query': finish if isinstance(finish, str) else str(finish),
-            })
+            try:
+                data = compute_route_data(
+                    start, finish, max_range, mpg, corridor, stop_penalty=0.5, request=request
+                )
+                return render(request, 'routing_api/map.html', {
+                    'data_json': json.dumps(data),
+                    'summary': data['summary'],
+                    'origin': data['origin'],
+                    'destination': data['destination'],
+                    'fuel_stops': data['fuel_stops'],
+                    'start_query': start if isinstance(start, str) else str(start),
+                    'finish_query': finish if isinstance(finish, str) else str(finish),
+                })
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"Error computing route data for HTML view: {e}")
+                status_code = status.HTTP_400_BAD_REQUEST if isinstance(e, ValidationError) else status.HTTP_500_INTERNAL_SERVER_ERROR
+                return render(request, 'routing_api/map.html', {
+                    'error': format_error_message(e),
+                    'start_query': start if isinstance(start, str) else str(start),
+                    'finish_query': finish if isinstance(finish, str) else str(finish),
+                }, status=status_code)
 
         data = compute_route_data(
             start, finish, max_range, mpg, corridor, stop_penalty=0.5, request=request
@@ -268,8 +299,8 @@ class RouteMapView(APIView):
     """
 
     def get(self, request, *args, **kwargs):
-        start = request.query_params.get('start') or 'New York, NY'
-        finish = request.query_params.get('finish') or 'Los Angeles, CA'
+        start = (request.query_params.get('start') or '').strip() or 'New York, NY'
+        finish = (request.query_params.get('finish') or '').strip() or 'Los Angeles, CA'
 
         try:
             try:
@@ -299,10 +330,10 @@ class RouteMapView(APIView):
                 'start_query': start,
                 'finish_query': finish,
             })
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(f"Error rendering route map: {e}")
             return render(request, 'routing_api/map.html', {
-                'error': str(e),
+                'error': format_error_message(e),
                 'start_query': start,
                 'finish_query': finish,
             })

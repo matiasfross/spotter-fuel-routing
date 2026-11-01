@@ -1,11 +1,12 @@
-import math
 import logging
+import math
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-import pandas as pd
+from typing import Any, Optional
+
 import numpy as np
-from scipy.spatial import cKDTree
+import pandas as pd
 from django.conf import settings
+from scipy.spatial import cKDTree
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +34,14 @@ class SpatialFuelService:
     """
 
     _instance: Optional['SpatialFuelService'] = None
-    _fuel_df: Optional[pd.DataFrame] = None
-    _stops_xy: Optional[np.ndarray] = None
+    _fuel_df: pd.DataFrame | None = None
+    _stops_xy: np.ndarray | None = None
     _mean_lat: float = 38.0  # Approx center of continental US
     _cos_lat: float = math.cos(math.radians(38.0))
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(SpatialFuelService, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
             cls._instance._initialize_data()
         return cls._instance
 
@@ -75,9 +76,9 @@ class SpatialFuelService:
 
     def find_candidate_stops_along_route(
         self,
-        route_coords: List[List[float]],
+        route_coords: list[list[float]],
         corridor_radius_miles: float = 10.0
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Given route polyline coordinates [[lon, lat], ...], finds all fuel stops within
         corridor_radius_miles of the route, tagged with their distance along the route.

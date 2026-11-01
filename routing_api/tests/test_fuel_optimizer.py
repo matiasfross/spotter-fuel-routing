@@ -1,5 +1,5 @@
-import pytest
 from django.test import SimpleTestCase
+
 from routing_api.services.fuel_optimizer import FuelOptimizer
 
 
@@ -209,3 +209,56 @@ class TestFuelOptimizer(SimpleTestCase):
         )
 
         assert res['number_of_stops'] == 1
+
+    def test_greedy_fallback_preferred_horizon_avoids_clustered_stops(self):
+        optimizer = FuelOptimizer(max_range_miles=500.0, mpg=10.0, stop_penalty=0.5)
+        # First station at 550 (> 500 force fallback).
+        # At 550: station at 590 is cheap ($2.80), station at 850 is $2.85.
+        # Preferred window [550 + 200 = 750, 550 + 490 = 1040] picks station at 850 instead of 590.
+        candidates = [
+            {'truckstop_id': 501, 'name': 'Stop 1 (Far)', 'address': 'A', 'city': 'A', 'state': 'NV',
+             'latitude': 40.0, 'longitude': -117.0, 'retail_price': 3.50, 'route_dist_miles': 550.0},
+            {'truckstop_id': 502, 'name': 'Stop Clustered', 'address': 'B', 'city': 'B', 'state': 'NV',
+             'latitude': 40.0, 'longitude': -116.0, 'retail_price': 2.80, 'route_dist_miles': 590.0},
+            {'truckstop_id': 503, 'name': 'Stop Preferred', 'address': 'C', 'city': 'C', 'state': 'UT',
+             'latitude': 40.0, 'longitude': -113.0, 'retail_price': 2.85, 'route_dist_miles': 850.0},
+        ]
+        start = {'name': 'Start', 'latitude': 40.0, 'longitude': -122.0}
+        finish = {'name': 'Finish', 'latitude': 40.0, 'longitude': -110.0}
+
+        res = optimizer.optimize(
+            candidates=candidates,
+            total_distance_miles=1100.0,
+            start_location=start,
+            finish_location=finish,
+        )
+
+        stop_ids = [s['truckstop_id'] for s in res['fuel_stops']]
+        assert 501 in stop_ids
+        assert 503 in stop_ids
+        assert 502 not in stop_ids  # Did not make redundant stop 40 miles after 501
+
+    def test_greedy_fallback_populates_leg_distance_to_next(self):
+        optimizer = FuelOptimizer(max_range_miles=500.0, mpg=10.0, stop_penalty=0.5)
+        candidates = [
+            {'truckstop_id': 601, 'name': 'Stop 1', 'address': 'A', 'city': 'A', 'state': 'NV',
+             'latitude': 40.0, 'longitude': -117.0, 'retail_price': 3.50, 'route_dist_miles': 550.0},
+            {'truckstop_id': 602, 'name': 'Stop 2', 'address': 'B', 'city': 'B', 'state': 'UT',
+             'latitude': 40.0, 'longitude': -112.0, 'retail_price': 3.20, 'route_dist_miles': 950.0},
+        ]
+        start = {'name': 'Start', 'latitude': 40.0, 'longitude': -122.0}
+        finish = {'name': 'Finish', 'latitude': 40.0, 'longitude': -108.0}
+
+        res = optimizer.optimize(
+            candidates=candidates,
+            total_distance_miles=1300.0,
+            start_location=start,
+            finish_location=finish,
+        )
+
+        stops = res['fuel_stops']
+        assert len(stops) == 2
+        assert 'leg_distance_to_next' in stops[0]
+        assert stops[0]['leg_distance_to_next'] == 400.0  # 950.0 - 550.0
+        assert 'leg_distance_to_next' in stops[1]
+        assert stops[1]['leg_distance_to_next'] == 350.0  # 1300.0 - 950.0

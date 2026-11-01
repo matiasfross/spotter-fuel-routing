@@ -1,5 +1,6 @@
 from django.urls import path
-from .views import RouteOptimizationView, RouteMapView, HealthCheckView
+
+from .views import HealthCheckView, RouteMapView, RouteOptimizationView
 
 urlpatterns = [
     path('route/', RouteOptimizationView.as_view(), name='route_optimization'),

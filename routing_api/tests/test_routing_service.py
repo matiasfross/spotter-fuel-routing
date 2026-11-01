@@ -1,8 +1,10 @@
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pytest
 from django.test import SimpleTestCase
-from rest_framework.exceptions import ValidationError, APIException
+from rest_framework.exceptions import APIException, ValidationError
+
 from routing_api.services.routing_service import RoutingService
 
 
@@ -44,8 +46,8 @@ class TestRoutingService(SimpleTestCase):
 
     @patch('urllib.request.urlopen')
     def test_get_route_http_400_error(self, mock_urlopen):
-        import urllib.error
         import io
+        import urllib.error
         fp = io.BytesIO(b'{"message": "Invalid coordinates"}')
         mock_urlopen.side_effect = urllib.error.HTTPError(
             url='http://router.project-osrm.org',
@@ -61,8 +63,8 @@ class TestRoutingService(SimpleTestCase):
 
     @patch('urllib.request.urlopen')
     def test_get_route_http_500_error(self, mock_urlopen):
-        import urllib.error
         import io
+        import urllib.error
         fp = io.BytesIO(b'{"message": "Internal Server Error"}')
         mock_urlopen.side_effect = urllib.error.HTTPError(
             url='http://router.project-osrm.org',
@@ -74,4 +76,21 @@ class TestRoutingService(SimpleTestCase):
 
         with pytest.raises(APIException):
             RoutingService.get_route((40.7, -74.0), (40.9, -75.0))
+
+    @patch('urllib.request.urlopen')
+    def test_get_route_http_429_rate_limit(self, mock_urlopen):
+        import io
+        import urllib.error
+        fp = io.BytesIO(b'{"message": "Too Many Requests"}')
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            url='http://router.project-osrm.org',
+            code=429,
+            msg='Too Many Requests',
+            hdrs={},
+            fp=fp
+        )
+
+        with pytest.raises(APIException) as exc:
+            RoutingService.get_route((40.7, -74.0), (40.9, -75.0))
+        assert "rate limit exceeded" in str(exc.value)
 
