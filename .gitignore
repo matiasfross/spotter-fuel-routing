@@ -52,6 +52,9 @@ generate_audio.py
 record_screen_actions.py
 loom_link.txt
 .agents/
+emailText.txt
+/fuel-prices-for-be-assessment.csv
+/fuel_stops_geocoded.csv
 
 
 
