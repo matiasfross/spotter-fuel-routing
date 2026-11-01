@@ -1,7 +1,8 @@
 # ⛽ Spotter - Fuel Routing & Cost Optimization API
 
 > **Backend Django Engineer Coding Assessment**  
-> Developed for **Spotter** by **Matias**.
+> Developed for **Spotter** by **Matias**.  
+> 🎬 **Demo Video Walkthrough:** [Watch/Download MP4](https://github.com/matiasfross/spotter-fuel-routing/releases/download/v1.0.0/spotter_demo_walkthrough.mp4) | [GitHub Release v1.0.0](https://github.com/matiasfross/spotter-fuel-routing/releases/tag/v1.0.0)
 
 An API and interactive visualization tool built with **Django 6.1 / Django REST Framework** that calculates optimal driving routes across the continental United States and determines the most cost-effective fuel stops along the corridor, strictly adhering to vehicle range and consumption constraints.
 
@@ -24,7 +25,7 @@ An API and interactive visualization tool built with **Django 6.1 / Django REST 
   - Interactive Leaflet.js web application with gas pump markers, interactive sidebar, and live route recalibration.
   - Ready-to-import `Postman_Collection.json` with pre-configured requests.
 - **Comprehensive Test Suite**:
-  - 20 unit and integration tests covering geocoding, boundary validation, routing, spatial search, DP optimizer, and API endpoints.
+  - 40 unit and integration tests covering geocoding, boundary validation, routing, spatial search, DP optimizer, and API endpoints (100% passing under both `manage.py test` and `pytest`).
 
 ---
 

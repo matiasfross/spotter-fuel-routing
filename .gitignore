@@ -40,3 +40,11 @@ htmlcov/
 .vscode/
 *.swp
 *.swo
+
+# Video generation & media
+*.mp4
+*.webm
+*.mp3
+video_temp/
+audio_tracks/
+
