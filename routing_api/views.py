@@ -112,6 +112,7 @@ def compute_route_data(
     max_range: float = 500.0,
     mpg: float = 10.0,
     corridor_radius: float = 10.0,
+    stop_penalty: float = 0.5,
     request=None
 ) -> Dict[str, Any]:
     """
@@ -136,7 +137,7 @@ def compute_route_data(
     )
 
     # 4. Optimize fuel stops using DP
-    optimizer = FuelOptimizer(max_range_miles=max_range, mpg=mpg)
+    optimizer = FuelOptimizer(max_range_miles=max_range, mpg=mpg, stop_penalty=stop_penalty)
     fuel_result = optimizer.optimize(
         candidates=candidates,
         total_distance_miles=route_info['distance_miles'],
@@ -193,30 +194,43 @@ class RouteOptimizationView(APIView):
         """
         GET /api/route/?start=New+York,+NY&finish=Los+Angeles,+CA
         """
-        start = request.query_params.get('start')
-        finish = request.query_params.get('finish')
-        max_range = float(request.query_params.get('max_range', 500.0))
-        mpg = float(request.query_params.get('mpg', 10.0))
-        corridor = float(request.query_params.get('corridor_radius', 10.0))
+        query_data = request.query_params.dict() if hasattr(request.query_params, 'dict') else dict(request.query_params)
+        serializer = RouteRequestSerializer(data=query_data)
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
 
-        if not start or not finish:
-            return Response(
-                {'error': "Both 'start' and 'finish' query parameters are required."},
-                status=status.HTTP_400_BAD_REQUEST
+        start = validated['start']
+        finish = validated['finish']
+        max_range = validated.get('max_range', 500.0)
+        mpg = validated.get('mpg', 10.0)
+        corridor = validated.get('corridor_radius', 10.0)
+
+        # Check if caller wants direct HTML map view:
+        # format=json explicitly overrides Accept: text/html
+        format_param = request.query_params.get('format', '').lower()
+        accept_header = request.headers.get('Accept', '')
+        is_html_requested = (
+            format_param == 'html' or
+            ('text/html' in accept_header and format_param != 'json')
+        )
+
+        if is_html_requested:
+            data = compute_route_data(
+                start, finish, max_range, mpg, corridor, stop_penalty=0.5, request=request
             )
-
-        # Check if caller wants direct HTML map view
-        if request.query_params.get('format') == 'html' or 'text/html' in request.headers.get('Accept', ''):
-            data = compute_route_data(start, finish, max_range, mpg, corridor, request=request)
             return render(request, 'routing_api/map.html', {
                 'data_json': json.dumps(data),
                 'summary': data['summary'],
                 'origin': data['origin'],
                 'destination': data['destination'],
                 'fuel_stops': data['fuel_stops'],
+                'start_query': start if isinstance(start, str) else str(start),
+                'finish_query': finish if isinstance(finish, str) else str(finish),
             })
 
-        data = compute_route_data(start, finish, max_range, mpg, corridor, request=request)
+        data = compute_route_data(
+            start, finish, max_range, mpg, corridor, stop_penalty=0.5, request=request
+        )
         return Response(data, status=status.HTTP_200_OK)
 
     def post(self, request, *args, **kwargs):
@@ -240,6 +254,7 @@ class RouteOptimizationView(APIView):
             max_range=validated.get('max_range', 500.0),
             mpg=validated.get('mpg', 10.0),
             corridor_radius=validated.get('corridor_radius', 10.0),
+            stop_penalty=0.5,
             request=request
         )
 
@@ -253,14 +268,28 @@ class RouteMapView(APIView):
     """
 
     def get(self, request, *args, **kwargs):
-        start = request.query_params.get('start', 'New York, NY')
-        finish = request.query_params.get('finish', 'Los Angeles, CA')
-        max_range = float(request.query_params.get('max_range', 500.0))
-        mpg = float(request.query_params.get('mpg', 10.0))
-        corridor = float(request.query_params.get('corridor_radius', 10.0))
+        start = request.query_params.get('start') or 'New York, NY'
+        finish = request.query_params.get('finish') or 'Los Angeles, CA'
 
         try:
-            data = compute_route_data(start, finish, max_range, mpg, corridor, request=request)
+            try:
+                max_range = float(request.query_params.get('max_range', 500.0))
+            except (ValueError, TypeError):
+                max_range = 500.0
+
+            try:
+                mpg = float(request.query_params.get('mpg', 10.0))
+            except (ValueError, TypeError):
+                mpg = 10.0
+
+            try:
+                corridor = float(request.query_params.get('corridor_radius', 10.0))
+            except (ValueError, TypeError):
+                corridor = 10.0
+
+            data = compute_route_data(
+                start, finish, max_range, mpg, corridor, stop_penalty=0.5, request=request
+            )
             return render(request, 'routing_api/map.html', {
                 'data_json': json.dumps(data),
                 'summary': data['summary'],
@@ -271,6 +300,7 @@ class RouteMapView(APIView):
                 'finish_query': finish,
             })
         except Exception as e:
+            logger.error(f"Error rendering route map: {e}")
             return render(request, 'routing_api/map.html', {
                 'error': str(e),
                 'start_query': start,

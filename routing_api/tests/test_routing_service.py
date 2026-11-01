@@ -1,11 +1,12 @@
 import json
 from unittest.mock import patch, MagicMock
 import pytest
+from django.test import SimpleTestCase
 from rest_framework.exceptions import ValidationError, APIException
 from routing_api.services.routing_service import RoutingService
 
 
-class TestRoutingService:
+class TestRoutingService(SimpleTestCase):
 
     @patch('urllib.request.urlopen')
     def test_get_route_success(self, mock_urlopen):
@@ -40,3 +41,37 @@ class TestRoutingService:
 
         with pytest.raises(ValidationError):
             RoutingService.get_route((40.7, -74.0), (40.9, -75.0))
+
+    @patch('urllib.request.urlopen')
+    def test_get_route_http_400_error(self, mock_urlopen):
+        import urllib.error
+        import io
+        fp = io.BytesIO(b'{"message": "Invalid coordinates"}')
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            url='http://router.project-osrm.org',
+            code=400,
+            msg='Bad Request',
+            hdrs={},
+            fp=fp
+        )
+
+        with pytest.raises(ValidationError) as exc:
+            RoutingService.get_route((40.7, -74.0), (40.9, -75.0))
+        assert "Routing engine rejected coordinates" in str(exc.value)
+
+    @patch('urllib.request.urlopen')
+    def test_get_route_http_500_error(self, mock_urlopen):
+        import urllib.error
+        import io
+        fp = io.BytesIO(b'{"message": "Internal Server Error"}')
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            url='http://router.project-osrm.org',
+            code=500,
+            msg='Internal Server Error',
+            hdrs={},
+            fp=fp
+        )
+
+        with pytest.raises(APIException):
+            RoutingService.get_route((40.7, -74.0), (40.9, -75.0))
+

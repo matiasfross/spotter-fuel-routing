@@ -15,7 +15,7 @@ class FuelOptimizer:
         self,
         max_range_miles: float = 500.0,
         mpg: float = 10.0,
-        stop_penalty: float = 0.0
+        stop_penalty: float = 0.5
     ):
         self.max_range = float(max_range_miles)
         self.mpg = float(mpg)
@@ -198,9 +198,6 @@ class FuelOptimizer:
 
         # Build stops response
         fuel_stops = []
-        total_fuel_cost = 0.0
-        total_purchased_gal = 0.0
-
         for step, idx in enumerate(path_indices):
             # Skip origin (idx 0) and destination (idx N-1) as fuel stops
             if idx == 0 or idx == N - 1:
@@ -216,13 +213,9 @@ class FuelOptimizer:
             leg_from_prev = node['route_dist_miles'] - prev_node['route_dist_miles']
             leg_to_next = next_node['route_dist_miles'] - node['route_dist_miles']
 
-            # At this stop, truck buys fuel for the next leg (or replenishes the prior leg)
-            # In our DP model, the truck buys fuel at node for the leg to next_node
+            # At this stop, truck buys fuel for the leg to next_node
             gallons_to_buy = round(leg_to_next / self.mpg, 2)
             cost_at_stop = round(gallons_to_buy * node['retail_price'], 2)
-
-            total_fuel_cost += cost_at_stop
-            total_purchased_gal += gallons_to_buy
 
             fuel_stops.append({
                 'stop_number': len(fuel_stops) + 1,
@@ -241,14 +234,24 @@ class FuelOptimizer:
                 'cost_at_stop': cost_at_stop,
             })
 
-        # Check first leg: if truck replenished the first leg at stop 1
         if fuel_stops:
+            # Reconcile fuel accounting:
+            # Attribute initial leg (from origin to stop 0) to stop 0
             first_leg = fuel_stops[0]['mile_marker']
             first_leg_gal = round(first_leg / self.mpg, 2)
-            first_leg_cost = round(first_leg_gal * fuel_stops[0]['retail_price'], 2)
-            # Total money spent covers full trip
-            total_trip_cost = round(total_fuel_cost + first_leg_cost, 2)
-            total_trip_gallons = round(total_purchased_gal + first_leg_gal, 2)
+            fuel_stops[0]['gallons_purchased'] = round(fuel_stops[0]['gallons_purchased'] + first_leg_gal, 2)
+            fuel_stops[0]['cost_at_stop'] = round(fuel_stops[0]['gallons_purchased'] * fuel_stops[0]['retail_price'], 2)
+
+            # Reconcile float rounding residual into final stop so:
+            # sum(s['gallons_purchased']) == total_consumed == total_trip_gallons
+            gal_sum = round(sum(s['gallons_purchased'] for s in fuel_stops), 2)
+            gal_residual = round(total_consumed - gal_sum, 2)
+            if gal_residual != 0.0:
+                fuel_stops[-1]['gallons_purchased'] = round(fuel_stops[-1]['gallons_purchased'] + gal_residual, 2)
+                fuel_stops[-1]['cost_at_stop'] = round(fuel_stops[-1]['gallons_purchased'] * fuel_stops[-1]['retail_price'], 2)
+
+            total_trip_cost = round(sum(s['cost_at_stop'] for s in fuel_stops), 2)
+            total_trip_gallons = round(sum(s['gallons_purchased'] for s in fuel_stops), 2)
         else:
             total_trip_cost = 0.0
             total_trip_gallons = 0.0
@@ -277,16 +280,17 @@ class FuelOptimizer:
         """
         Fallback greedy strategy if graph has sparse connectivity.
         Selects the cheapest accessible station in each 450-mile horizon.
+        If a gap exceeds vehicle max range, selects the nearest reachable station ahead
+        and logs a warning.
         """
         fuel_stops = []
         curr_dist = 0.0
-        total_cost = 0.0
-        total_gal = 0.0
+        warnings = []
         total_consumed = round(total_dist / self.mpg, 2)
 
         while curr_dist + self.max_range < total_dist:
             # Candidate window: from curr_dist to curr_dist + max_range
-            # Prefer stations in [curr_dist + 200, curr_dist + max_range - 20]
+            # Prefer stations in [curr_dist + 200, curr_dist + max_range - 10]
             horizon_stops = [
                 s for s in candidates
                 if curr_dist < s['route_dist_miles'] <= curr_dist + self.max_range - 10.0
@@ -300,16 +304,25 @@ class FuelOptimizer:
                 ]
 
             if not horizon_stops:
-                break
+                # Gap exceeds max range: find nearest available future station ahead
+                future_stops = [s for s in candidates if s['route_dist_miles'] > curr_dist]
+                if not future_stops:
+                    warnings.append(
+                        f"No fuel stations found along the route corridor between mile {curr_dist:.1f} and destination ({total_dist:.1f} miles)."
+                    )
+                    break
+                best_stop = min(future_stops, key=lambda s: s['route_dist_miles'])
+                gap = best_stop['route_dist_miles'] - curr_dist
+                warnings.append(
+                    f"Warning: Station gap of {gap:.1f} miles between mile {curr_dist:.1f} and {best_stop['route_dist_miles']:.1f} "
+                    f"exceeds vehicle max range ({self.max_range:.0f} miles). Selected nearest available future station."
+                )
+            else:
+                best_stop = min(horizon_stops, key=lambda s: s['retail_price'])
 
-            # Pick station with lowest price in the latter half of the window if possible
-            best_stop = min(horizon_stops, key=lambda s: s['retail_price'])
             leg = best_stop['route_dist_miles'] - curr_dist
             gal = round(leg / self.mpg, 2)
             cost = round(gal * best_stop['retail_price'], 2)
-
-            total_cost += cost
-            total_gal += gal
 
             fuel_stops.append({
                 'stop_number': len(fuel_stops) + 1,
@@ -328,19 +341,45 @@ class FuelOptimizer:
             })
             curr_dist = best_stop['route_dist_miles']
 
-        # Add cost for remaining leg to destination
+        # Check terminal leg to destination
         rem_dist = total_dist - curr_dist
+        if rem_dist > self.max_range:
+            warnings.append(
+                f"Warning: Terminal leg distance ({rem_dist:.1f} miles) from last fuel stop "
+                f"(mile {curr_dist:.1f}) to destination ({total_dist:.1f} miles) exceeds vehicle max range ({self.max_range:.0f} miles)."
+            )
+
+        # Attribute remaining leg to destination to the final fuel stop
         if fuel_stops:
             rem_gal = round(rem_dist / self.mpg, 2)
-            rem_cost = round(rem_gal * fuel_stops[-1]['retail_price'], 2)
-            total_cost += rem_cost
-            total_gal += rem_gal
+            fuel_stops[-1]['gallons_purchased'] = round(fuel_stops[-1]['gallons_purchased'] + rem_gal, 2)
+            fuel_stops[-1]['cost_at_stop'] = round(fuel_stops[-1]['gallons_purchased'] * fuel_stops[-1]['retail_price'], 2)
 
-        return {
+            # Reconcile float rounding residual into final stop so:
+            # sum(s['gallons_purchased']) == total_consumed == total_purchased_gallons
+            gal_sum = round(sum(s['gallons_purchased'] for s in fuel_stops), 2)
+            gal_residual = round(total_consumed - gal_sum, 2)
+            if gal_residual != 0.0:
+                fuel_stops[-1]['gallons_purchased'] = round(fuel_stops[-1]['gallons_purchased'] + gal_residual, 2)
+                fuel_stops[-1]['cost_at_stop'] = round(fuel_stops[-1]['gallons_purchased'] * fuel_stops[-1]['retail_price'], 2)
+
+            total_cost = round(sum(s['cost_at_stop'] for s in fuel_stops), 2)
+            total_gal = round(sum(s['gallons_purchased'] for s in fuel_stops), 2)
+        else:
+            total_cost = 0.0
+            total_gal = 0.0
+
+        avg_price = round(total_cost / total_gal, 3) if total_gal > 0 else 0.0
+
+        result = {
             'fuel_stops': fuel_stops,
-            'total_fuel_cost': round(total_cost, 2),
+            'total_fuel_cost': total_cost,
             'total_fuel_consumed_gallons': total_consumed,
-            'total_fuel_purchased_gallons': round(total_gal, 2),
-            'average_price_per_gallon': round(total_cost / total_gal, 3) if total_gal > 0 else 0.0,
+            'total_fuel_purchased_gallons': total_gal,
+            'average_price_per_gallon': avg_price,
             'number_of_stops': len(fuel_stops),
         }
+        if warnings:
+            result['message'] = " ".join(warnings)
+
+        return result

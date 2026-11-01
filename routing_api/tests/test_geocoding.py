@@ -1,9 +1,10 @@
 import pytest
+from django.test import SimpleTestCase
 from rest_framework.exceptions import ValidationError
 from routing_api.services.geocoding_service import GeocodingService
 
 
-class TestGeocodingService:
+class TestGeocodingService(SimpleTestCase):
 
     def test_resolve_offline_major_cities(self):
         nyc = GeocodingService.resolve_location("New York, NY", field_name="start")

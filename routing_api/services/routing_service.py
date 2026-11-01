@@ -82,6 +82,17 @@ class RoutingService:
                     'bounding_box': bbox,
                 }
 
+        except urllib.error.HTTPError as e:
+            logger.error(f"HTTP error contacting routing engine: {e.code} {e.reason}")
+            if e.code == 400:
+                try:
+                    err_content = e.read().decode('utf-8')
+                    err_json = json.loads(err_content)
+                    msg = err_json.get('message', 'Invalid routing request coordinates.')
+                except Exception:
+                    msg = "Invalid routing request coordinates."
+                raise ValidationError({'route': f"Routing engine rejected coordinates: {msg}"})
+            raise APIException(f"Routing engine returned error status {e.code}: {e.reason}")
         except urllib.error.URLError as e:
             logger.error(f"Network error contacting routing engine: {e}")
             raise APIException(

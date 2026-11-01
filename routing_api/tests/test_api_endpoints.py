@@ -122,3 +122,101 @@ class TestRouteApiEndpoints(APITestCase):
         content = response.content.decode('utf-8')
         assert "Spotter Fuel Route Optimizer" in content
         assert "L.map('map'" in content
+
+    def test_route_get_invalid_query_params(self):
+        url = reverse('route_optimization')
+        # Non-numeric max_range
+        response = self.client.get(url, {
+            'start': 'New York, NY',
+            'finish': 'Chicago, IL',
+            'max_range': 'invalid_number'
+        })
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        data = response.json()
+        assert 'max_range' in data
+
+        # Out-of-bounds mpg
+        response = self.client.get(url, {
+            'start': 'New York, NY',
+            'finish': 'Chicago, IL',
+            'mpg': -5.0
+        })
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        data = response.json()
+        assert 'mpg' in data
+
+    @patch('routing_api.services.routing_service.RoutingService.get_route')
+    def test_route_format_json_precedence_over_accept_html(self, mock_get_route):
+        mock_get_route.return_value = {
+            'distance_miles': 300.0,
+            'duration_hours': 5.0,
+            'coordinates': [[-74.006, 40.7128], [-77.0369, 38.9072]],
+            'bounding_box': [-77.0369, 38.9072, -74.006, 40.7128]
+        }
+
+        url = reverse('route_optimization')
+        response = self.client.get(
+            url,
+            {'start': 'New York, NY', 'finish': 'Washington, DC', 'format': 'json'},
+            HTTP_ACCEPT='text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert 'application/json' in response['Content-Type']
+        data = response.json()
+        assert 'summary' in data
+        assert data['summary']['total_distance_miles'] == 300.0
+
+    @patch('routing_api.services.routing_service.RoutingService.get_route')
+    def test_route_map_safe_param_parsing(self, mock_get_route):
+        mock_get_route.return_value = {
+            'distance_miles': 200.0,
+            'duration_hours': 3.0,
+            'coordinates': [[-74.0, 40.7], [-75.0, 40.0]],
+            'bounding_box': [-75.0, 40.0, -74.0, 40.7]
+        }
+
+        url = reverse('route_map')
+        response = self.client.get(url, {
+            'start': 'New York, NY',
+            'finish': 'Philadelphia, PA',
+            'max_range': 'bad_float',
+            'mpg': 'invalid'
+        })
+        assert response.status_code == status.HTTP_200_OK
+        assert 'text/html' in response['Content-Type']
+        content = response.content.decode('utf-8')
+        assert "Spotter Fuel Route Optimizer" in content
+
+    @patch('routing_api.services.routing_service.RoutingService.get_route')
+    def test_fuel_accounting_in_api_response(self, mock_get_route):
+        mock_get_route.return_value = {
+            'distance_miles': 900.0,
+            'duration_hours': 14.0,
+            'coordinates': [
+                [-74.006, 40.7128],
+                [-78.0, 40.5],
+                [-82.0, 40.0],
+                [-86.0, 39.8],
+                [-89.0, 40.2]
+            ],
+            'bounding_box': [-89.0, 39.8, -74.006, 40.7128]
+        }
+
+        url = reverse('route_optimization')
+        response = self.client.get(url, {
+            'start': 'New York, NY',
+            'finish': 'Peoria, IL'
+        })
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        summary = data['summary']
+        fuel_stops = data['fuel_stops']
+
+        assert len(fuel_stops) >= 1
+        sum_cost = round(sum(s['cost_at_stop'] for s in fuel_stops), 2)
+        sum_gal = round(sum(s['gallons_purchased'] for s in fuel_stops), 2)
+
+        assert sum_cost == summary['total_fuel_cost_dollars']
+        assert sum_gal == summary['total_fuel_consumed_gallons']
+        assert sum_gal == summary['total_fuel_purchased_gallons']
+
